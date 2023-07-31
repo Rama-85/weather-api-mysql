@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 type celsius float64
@@ -27,6 +29,7 @@ type Rain struct {
 }
 
 type WeatherData struct {
+	gorm.Model
 	Name string `json:"name"`
 	Main struct {
 		Airtemp       `json:"Airtemp"`
@@ -40,14 +43,19 @@ type WeatherData struct {
 	} `json:"main"`
 }
 
+func GetWeather(db *gorm.DB, wd *[]WeatherData) (err error) {
+	err = db.Find(wd).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func hello(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("hello from GoLang!\n"))
 }
 
 func query(city string) (WeatherData, error) {
-	//apiConfig, err := loadApiConfig(".apiConfig")
-	//if err != nil {
-	//	return WeatherData{}, err
 
 	resp, err := http.Get("http://api.open-meteo.com/v1/forecast?" + "&q=" + city)
 	if err != nil {
