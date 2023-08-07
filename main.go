@@ -1,91 +1,100 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	f "fmt"
 	"net/http"
-	"strings"
 
-	"gorm.io/gorm"
+	_ "github.com/go-sql-driver/mysql"
 )
 
-type celsius float64
-type km float64
-type mm int
-
-type Airtemp struct {
-	maximum, minimum celsius
+type OpenMetoResponse struct {
+	Latitude              float64      `json:"latitude"`
+	Longitude             float64      `json:"longitude"`
+	Generationtime_ms     float64      `json:"generationtime_ms"`
+	Utc_offset_seconds    int          `json:"utc_offset_seconds"`
+	Timezone              string       `json:"timezone"`
+	Timezone_abbreviation string       `json:"timezone_abbrevation"`
+	Elevation             float64      `json:"elevation"`
+	Hourly_units          Hourly_units `json:"hourly_units"`
+	Hourly                Hourly       `json:"hourly"`
 }
-
-type Roadtemp struct {
-	maximum, minimum celsius
+type Hourly_units struct {
+	Time                 string `json:"time"`
+	Temperature_3m       string `json:"temperature_3m"`
+	Relativehumidity_2m  string `json:"relativehumidity_2m"`
+	Windspeed_10m        string `json:"windspeed_10m"`
+	Winddirection_10m    string `json:"winddirection_10m"`
+	Pressure_msl         string `json:"pressure_msl"`
+	Soil_temperature_6cm string `json:"soil_temperature_6cm"`
+	Visibility           string `json:"visibility"`
+	Rain                 string `json:"rain"`
 }
-
-type Visibility struct {
-	maximum, minimum km
-}
-
-type Rain struct {
-	maximum, minimum mm
-}
-
-type WeatherData struct {
-	gorm.Model
-	Name string `json:"name"`
-	Main struct {
-		Airtemp       `json:"Airtemp"`
-		AirPressure   float64 `json:"AirPressure"`
-		Humidity      float64 `json:"Humidity"`
-		WindDirection string  `json:"WindDirection"`
-		Roadtemp      `json:"Roadtemp"`
-		Visibility    `json:"Visibility"`
-		Windspeed     float64 `json:"Windspeed"`
-		Rain          `json:"Rain"`
-	} `json:"main"`
-}
-
-func GetWeather(db *gorm.DB, wd *[]WeatherData) (err error) {
-	err = db.Find(wd).Error
-	if err != nil {
-		return err
-	}
-	return nil
+type Hourly struct {
+	Time                 []string  `json:"time"`
+	Temperature_3m       []float64 `json:"temperature_3m"`
+	Relativehumidity_2m  []int     `json:"relativehumidity_2m"`
+	Windspeed_10m        []float64 `json:"windspeed_10m"`
+	Winddirection_10m    []int     `json:"winddirection_10m"`
+	Pressure_msl         []float64 `json:"pressure_msl"`
+	Soil_temperature_6cm []float64 `json:"soil_temperature_6cm"`
+	Visibility           []float64 `json:"visibility"`
+	Rain                 []float64 `json:"rain"`
 }
 
 func hello(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("hello from GoLang!\n"))
 }
 
-func query(city string) (WeatherData, error) {
-
-	resp, err := http.Get("http://api.open-meteo.com/v1/forecast?" + "&q=" + city)
+func weather_data() (OpenMetoResponse, error) {
+	var r OpenMetoResponse
+	resp, err := http.Get("https://api.open-meteo.com/v1/forecast?latitude=11.7117117&longitude=79.3271609&timezone=IST&hourly=temperature_2m&hourly=relativehumidity_2m&hourly=windspeed_10m&hourly=winddirection_10m&hourly=pressure_msl&hourly=soil_temperature_6cm&hourly=visibility&hourly=rain")
 	if err != nil {
-		return WeatherData{}, err
+		return r, err
 	}
-
 	defer resp.Body.Close()
 
-	var d WeatherData
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return WeatherData{}, err
+	decoder := json.NewDecoder(resp.Body)
+	err = decoder.Decode(&r)
+	if err != nil {
+		return r, err
 	}
-	return d, nil
-
+	f.Println(r)
+	return r, nil
 }
 
 func main() {
-	http.HandleFunc("/hello", hello)
 
+	db, err := sql.Open("mysql", "root:root@tcp(localhost:3306)/weather")
+	if err != nil {
+		f.Println("error validating sql.open arguments")
+		panic(err.Error())
+	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		f.Println("error verifying connection with db.ping")
+		panic(err.Error())
+	}
+	insert, err := db.Query("INSERT INTO `weather`.`weather_data`(`temperature_3m`)VALUES(`temperature_3m`);")
+	if err != nil {
+		panic(err.Error())
+	}
+	defer insert.Close()
+	f.Println("successful connection to Database!")
+
+	http.HandleFunc("/hello", hello)
 	http.HandleFunc("/weather/",
 		func(w http.ResponseWriter, r *http.Request) {
-			city := strings.SplitN(r.URL.Path, "/", 3)[2]
-			data, err := query(city)
+			loc, err := weather_data()
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("content-Type", "application/json; charset=utf-8")
-			json.NewEncoder(w).Encode(data)
+			json.NewEncoder(w).Encode(loc)
 		})
-
 	http.ListenAndServe(":8080", nil)
 }
