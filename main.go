@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	f "fmt"
+	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -47,7 +49,7 @@ func hello(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("hello from GoLang!\n"))
 }
 
-func weather_data() (OpenMetoResponse, error) {
+func weatherinfo() (OpenMetoResponse, error) {
 	var r OpenMetoResponse
 	resp, err := http.Get("https://api.open-meteo.com/v1/forecast?latitude=11.7117117&longitude=79.3271609&timezone=IST&hourly=temperature_2m&hourly=relativehumidity_2m&hourly=windspeed_10m&hourly=winddirection_10m&hourly=pressure_msl&hourly=soil_temperature_6cm&hourly=visibility&hourly=rain")
 	if err != nil {
@@ -60,35 +62,51 @@ func weather_data() (OpenMetoResponse, error) {
 	if err != nil {
 		return r, err
 	}
-	f.Println(r)
+	fmt.Println(r)
 	return r, nil
 }
 
-func main() {
+var dbm *sql.DB
 
+func connectDB() {
 	db, err := sql.Open("mysql", "root:root@tcp(localhost:3306)/weather")
 	if err != nil {
-		f.Println("error validating sql.open arguments")
-		panic(err.Error())
+		log.Fatal(err)
 	}
-	defer db.Close()
+	fmt.Println("mysql connected")
+	dbm = db
+}
+func createTable() {
+	query := `create table weatherinfo (
+			wid int auto increment,
+			temperature_3m  float64 auto increment,
+			create_at datetime
+			primarykey(temperature_3m)
+			 );`
 
-	err = db.Ping()
+	_, err := dbm.Exec(query)
 	if err != nil {
-		f.Println("error verifying connection with db.ping")
-		panic(err.Error())
+		log.Fatal(err)
 	}
-	insert, err := db.Query("INSERT INTO `weather`.`weather_data`(`temperature_3m`)VALUES(`temperature_3m`);")
-	if err != nil {
-		panic(err.Error())
-	}
-	defer insert.Close()
-	f.Println("successful connection to Database!")
+	fmt.Println("weatherinfo table created....")
+}
 
+func insertTemp() {
+	create_at := time.Now()
+	result, err := dbm.Exec(`insert into weatherinfo (create_at)value(?)`, create_at)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		value, _ := result.LastInsertId()
+		fmt.Println("Record insert for temperature_3m=", value)
+	}
+}
+
+func main() {
 	http.HandleFunc("/hello", hello)
 	http.HandleFunc("/weather/",
 		func(w http.ResponseWriter, r *http.Request) {
-			loc, err := weather_data()
+			loc, err := weatherinfo()
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -97,4 +115,7 @@ func main() {
 			json.NewEncoder(w).Encode(loc)
 		})
 	http.ListenAndServe(":8080", nil)
+	connectDB()
+	createTable()
+	insertTemp()
 }
